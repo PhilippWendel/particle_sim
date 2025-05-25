@@ -30,7 +30,6 @@ pub fn constrain_to_bounds(self: *Particle, width: f32, height: f32) void {
     if (self.position.y > height) self.position.y = height;
 }
 
-// const std = @import("std");
-const rl = @import("raylib");
-
 const Particle = @This();
+
+const rl = @import("raylib");

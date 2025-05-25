@@ -1,4 +1,8 @@
-pub fn build(b: *std.Build) void {
+// nix develop github:Cloudef/zig2nix#multimedia-latest
+// https://github.com/Not-Nik/raylib-zig?tab=readme-ov-file#exporting-for-web
+// zig build -Dtarget=wasm32-emscripten --sysroot ~/.cache/zig/p/N-V-__8AALRTBQDo_pUJ8IQ-XiIyYwDKQVwnr7-7o5kvPDGE/upstream/emscripten
+
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -7,43 +11,41 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const raylib = raylib_dep.module("raylib"); // main raylib module
-    const raygui = raylib_dep.module("raygui"); // raygui module
-    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
+    const raylib = raylib_dep.module("raylib");
+    const raylib_artifact = raylib_dep.artifact("raylib");
 
-    const exe_mod = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    //web exports are completely separate
+    if (target.query.os_tag == .emscripten) {
+        const exe_lib = try rlz.emcc.compileForEmscripten(b, "particle_sim", "src/main.zig", target, optimize);
 
-    const exe = b.addExecutable(.{
-        .name = "particle_sim",
-        .root_module = exe_mod,
-    });
-    exe.linkLibrary(raylib_artifact);
-    exe.root_module.addImport("raylib", raylib);
-    exe.root_module.addImport("raygui", raygui);
+        exe_lib.linkLibrary(raylib_artifact);
+        exe_lib.root_module.addImport("raylib", raylib);
 
-    b.installArtifact(exe);
+        // Note that raylib itself is not actually added to the exe_lib output file, so it also needs to be linked with emscripten.
+        const link_step = try rlz.emcc.linkWithEmscripten(b, &[_]*std.Build.Step.Compile{ exe_lib, raylib_artifact });
+        //this lets your program access files like "resources/my-image.png":
+        //link_step.addArg("--embed-file");
+        //link_step.addArg("resources/");
 
-    const run_cmd = b.addRunArtifact(exe);
-
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        b.getInstallStep().dependOn(&link_step.step);
+        const run_step = try rlz.emcc.emscriptenRunStep(b);
+        run_step.step.dependOn(&link_step.step);
+        const run_option = b.step("run", "Run particle_sim");
+        run_option.dependOn(&run_step.step);
+        return;
     }
 
-    const run_step = b.step("run", "Run the app");
+    const exe = b.addExecutable(.{ .name = "particle_sim", .root_source_file = b.path("src/main.zig"), .optimize = optimize, .target = target });
+
+    exe.linkLibrary(raylib_artifact);
+    exe.root_module.addImport("raylib", raylib);
+
+    const run_cmd = b.addRunArtifact(exe);
+    const run_step = b.step("run", "Run particle_sim");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_unit_tests = b.addTest(.{
-        .root_module = exe_mod,
-    });
-
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_exe_unit_tests.step);
+    b.installArtifact(exe);
 }
 
 const std = @import("std");
+const rlz = @import("raylib_zig");
