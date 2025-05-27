@@ -10,81 +10,46 @@ pub fn main() anyerror!void {
     defer rl.closeWindow();
     rl.setTargetFPS(60);
 
-    var particles: std.ArrayList(Particle) = .init(allocator);
-    var constraints: std.ArrayList(Constraint) = .init(allocator);
+    var myFirstSimulation = try @import("Simulations/MyFirstSimulation/MyFirstSimulation.zig").init(allocator);
 
-    rl.traceLog(.info, "Create particles", .{});
-    // Create Particles
-    for (0..ROWS) |row| {
-        for (0..COLS) |col| {
-            const x = DistanceBetweenPoints + tof32(col) * DistanceBetweenPoints;
-            const y = DistanceBetweenPoints + tof32(row) * DistanceBetweenPoints;
-            const is_pinned = (row == 0 or row == 9) and (col == 0 or col == 19);
-            try particles.append(.init(x, y, is_pinned));
-        }
-    }
-    const box_pos = particles.items.len;
-    try particles.append(.init(1050, 50, false));
-    try particles.append(.init(1050, 100, false));
-    try particles.append(.init(1100, 50, false));
-    try particles.append(.init(1100, 100, false));
-    const pendulum_pos = particles.items.len;
-    try particles.append(.init(1200, 50, true));
-    for (2..7) |i| try particles.append(.init(1200, 50 * tof32(i), false));
-
-    rl.traceLog(.info, "Create constraints", .{});
-    // Create Constraints
-    for (0..ROWS) |row| {
-        for (0..COLS) |col| {
-            if (col < COLS - 1)
-                try constraints.append(.init(&particles.items[row * COLS + col], &particles.items[row * COLS + col + 1])); // Horizontal constraint
-            if (row < ROWS - 1)
-                try constraints.append(.init(&particles.items[row * COLS + col], &particles.items[(row + 1) * COLS + col])); // Vertical constraint
-        }
-    }
-    for (particles.items[box_pos .. box_pos + 4]) |*p1|
-        for (particles.items[box_pos .. box_pos + 4]) |*p2|
-            if (p1 != p2) try constraints.append(.init(p1, p2));
-    for (particles.items[pendulum_pos .. pendulum_pos + 4], particles.items[pendulum_pos + 1 .. pendulum_pos + 5]) |*p1, *p2|
-        try constraints.append(.init(p1, p2));
-
+    var camera2d: rl.Camera2D = .{
+        .offset = .zero(),
+        .target = .zero(),
+        .rotation = 0,
+        .zoom = 1,
+    };
     // Main loop
     rl.traceLog(.info, "Main loop", .{});
     while (!rl.windowShouldClose()) {
-        const force = blk: {
-            var f: rl.Vector2 = .init(0, Gravity);
-            if (rl.isMouseButtonDown(.left)) // mouse moves particles
-                f = f.add(rl.getMouseDelta().scale(0.25));
-            break :blk f;
-        };
+        panCamera(&camera2d);
+        zoomCamera(&camera2d);
         //apply force and update particles
-        for (particles.items) |*p| {
-            p.apply_force(force);
-            p.update(TimeStep);
-            p.constrain_to_bounds(screenWidth, screenHeight);
-        }
-
-        for (0..5) |_|
-            for (constraints.items) |*c| c.satisfy();
+        myFirstSimulation.step();
 
         rl.beginDrawing();
         defer rl.endDrawing();
+
+        camera2d.begin();
+        defer drawUi();
+        defer camera2d.end();
+
         drawBackground();
-
-        for (constraints.items) |c|
-            if (c.active) rl.drawLineV(c.p1.position, c.p2.position, .white);
-        for (particles.items) |p|
-            rl.drawCircleV(p.position, 5.0, if (p.is_pinned) .red else .white);
-
-        rl.drawFPS(10, 10);
-        rl.drawText(
-            "Click mouse left and drag in a directon to apply a force.",
-            200,
-            10,
-            30,
-            .white,
-        );
+        myFirstSimulation.draw();
     }
+}
+
+fn drawUi() void {
+    rl.drawFPS(10, 10);
+    rl.drawText("Click mouse left and drag in a directon to apply a force.", 200, 10, 30, .white);
+}
+
+fn panCamera(camera2d: *rl.Camera2D) void {
+    if (rl.isMouseButtonDown(.middle)) camera2d.target = camera2d.target.subtract(rl.getMouseDelta());
+}
+
+fn zoomCamera(camera2d: *rl.Camera2D) void {
+    camera2d.zoom += rl.getMouseWheelMoveV().y * 0.05;
+    camera2d.zoom = rl.math.clamp(camera2d.zoom, 0.1, 5.0);
 }
 
 pub inline fn tof32(number: anytype) f32 {
@@ -92,7 +57,7 @@ pub inline fn tof32(number: anytype) f32 {
 }
 
 fn drawBackground() void {
-    const grid_size: i32 = 25;
+    const grid_size: f32 = 25;
     const grid_color: rl.Color = .init(255, 255, 255, 32);
 
     rl.clearBackground(.init(32, 32, 32, 255));
@@ -106,22 +71,12 @@ fn drawBackground() void {
         while (pos < screenWidth) : (pos += grid_size)
             rl.drawLine(pos, 0, pos, screenHeight, grid_color);
     }
+    rl.drawRectangleLines(0, 0, screenWidth, screenHeight, .red);
 }
 
 // Constants
-const screenWidth = 1280;
-const screenHeight = 720;
-
-const Gravity = 9.81;
-const TimeStep = 0.1;
-
-const ROWS = 10;
-const COLS = 20;
-const DistanceBetweenPoints = 50.0;
-
-// Own Code
-const Particle = @import("Particle.zig");
-const Constraint = @import("Constraint.zig");
+pub const screenWidth = 1280;
+pub const screenHeight = 720;
 
 // Libs
 const std = @import("std");
